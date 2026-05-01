@@ -64,6 +64,7 @@ public final class MainActivity extends Activity {
     private EditText search;
     private Button moviesButton;
     private Button tvButton;
+    private TextView subtitle;
     private int searchGeneration = 0;
 
     private final Runnable searchRunnable = new Runnable() {
@@ -79,13 +80,8 @@ public final class MainActivity extends Activity {
         getWindow().setStatusBarColor(BG);
         getWindow().setNavigationBarColor(BG);
 
-        cache = new PluginCache(this);
-        pluginManager = new PluginManager(this);
-        plugins = pluginManager.loadPlugins();
-        for (StreamPlugin plugin : plugins) pluginNames.put(plugin.id(), plugin.name());
-
         buildShell();
-        runSearch();
+        initializePlugins();
     }
 
     @Override
@@ -113,7 +109,7 @@ public final class MainActivity extends Activity {
         title.setTypeface(Typeface.DEFAULT_BOLD);
         header.addView(title);
 
-        TextView subtitle = new TextView(this);
+        subtitle = new TextView(this);
         subtitle.setText(plugins.size() + " plugins loaded - external playback");
         subtitle.setTextColor(MUTED);
         subtitle.setTextSize(13);
@@ -165,6 +161,25 @@ public final class MainActivity extends Activity {
         setContentView(root);
     }
 
+    private void initializePlugins() {
+        try {
+            cache = new PluginCache(this);
+            pluginManager = new PluginManager(this);
+            plugins = pluginManager.loadPlugins();
+            pluginNames.clear();
+            for (StreamPlugin plugin : plugins) pluginNames.put(plugin.id(), plugin.name());
+            subtitle.setText(plugins.size() + " plugins loaded - external playback");
+            runSearch();
+        } catch (Exception error) {
+            plugins = new ArrayList<>();
+            pluginNames.clear();
+            subtitle.setText("Plugin startup failed");
+            status.setText("Startup error");
+            content.removeAllViews();
+            content.addView(emptyState("Could not load plugins", friendlyError(error)));
+        }
+    }
+
     private Button tabButton(String label, final MediaType type) {
         Button button = new Button(this);
         button.setText(label);
@@ -211,19 +226,22 @@ public final class MainActivity extends Activity {
             public void run() {
                 final List<MediaItem> all = new ArrayList<>();
                 boolean usedCache = false;
-                for (StreamPlugin plugin : plugins) {
-                    if (!plugin.supports(selectedType)) continue;
-                    try {
-                        List<MediaItem> items = plugin.search(effectiveQuery, selectedType);
-                        cache.putSearch(plugin.id(), selectedType.id, effectiveQuery, items);
-                        all.addAll(items);
-                    } catch (Exception error) {
-                        List<MediaItem> cached = cache.getSearch(plugin.id(), selectedType.id, effectiveQuery);
-                        if (!cached.isEmpty()) {
-                            usedCache = true;
-                            all.addAll(cached);
+                try {
+                    for (StreamPlugin plugin : plugins) {
+                        if (!plugin.supports(selectedType)) continue;
+                        try {
+                            List<MediaItem> items = plugin.search(effectiveQuery, selectedType);
+                            if (cache != null) cache.putSearch(plugin.id(), selectedType.id, effectiveQuery, items);
+                            all.addAll(items);
+                        } catch (Exception error) {
+                            List<MediaItem> cached = cache == null ? new ArrayList<MediaItem>() : cache.getSearch(plugin.id(), selectedType.id, effectiveQuery);
+                            if (!cached.isEmpty()) {
+                                usedCache = true;
+                                all.addAll(cached);
+                            }
                         }
                     }
+                } catch (Exception ignored) {
                 }
                 final boolean cacheResult = usedCache;
                 main.post(new Runnable() {
@@ -316,10 +334,10 @@ public final class MainActivity extends Activity {
                     StreamPlugin plugin = pluginManager.get(item.pluginId);
                     if (plugin != null) {
                         details = plugin.loadDetails(item);
-                        cache.putDetails(details);
+                        if (details != null && cache != null) cache.putDetails(details);
                     }
                 } catch (Exception ignored) {
-                    details = cache.getDetails(item.pluginId, item.type.id, item.id);
+                    details = cache == null ? null : cache.getDetails(item.pluginId, item.type.id, item.id);
                 }
                 if (details == null) details = item;
                 final MediaItem finalDetails = details;
@@ -485,6 +503,12 @@ public final class MainActivity extends Activity {
         } catch (Exception ignored) {
         }
         return url.length() > 42 ? url.substring(0, 42) : url;
+    }
+
+    private String friendlyError(Exception error) {
+        String message = error == null ? "" : error.getMessage();
+        if (message == null || message.trim().isEmpty()) return "Unexpected startup failure. Try reinstalling the debug APK.";
+        return message;
     }
 
     private GradientDrawable rounded(int color, int radius, int strokeWidth, int strokeColor) {

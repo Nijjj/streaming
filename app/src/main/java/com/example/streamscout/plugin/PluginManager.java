@@ -31,8 +31,11 @@ public final class PluginManager {
         plugins.clear();
         copyBundledPluginsIfMissing();
         scanPluginRoot(internalPluginDir());
-        File external = context.getExternalFilesDir("plugins");
-        if (external != null) scanPluginRoot(external);
+        try {
+            File external = context.getExternalFilesDir("plugins");
+            if (external != null) scanPluginRoot(external);
+        } catch (Exception ignored) {
+        }
         return new ArrayList<>(plugins.values());
     }
 
@@ -71,7 +74,7 @@ public final class PluginManager {
             for (String pluginId : pluginIds) {
                 String assetFolder = ASSET_PLUGIN_ROOT + "/" + pluginId;
                 File targetFolder = new File(root, pluginId);
-                if (!targetFolder.exists()) targetFolder.mkdirs();
+                if (!targetFolder.exists() && !targetFolder.mkdirs()) continue;
                 String[] files = assets.list(assetFolder);
                 if (files == null) continue;
                 for (String fileName : files) {
